@@ -76,8 +76,6 @@ fn main() {
     // Set up core shell
     let cli = Cli::parse();
     let (killtx, killrx) = unbounded::<()>();
-    // let sigkilltx = killtx.clone();
-    // ctrlc::set_handler(move || sigkilltx.send(()).unwrap()).unwrap();
 
     // Set up memory
     let mut memory: [u8; 4096] = [0; 4096];
