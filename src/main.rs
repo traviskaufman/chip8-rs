@@ -1,3 +1,10 @@
+/// TODO:
+/// - Keypad test
+/// - Quirks test
+/// - Beep test
+/// - Run an actual game
+/// - Maybe implement super-chip or xo-chip
+/// - Maybe implement better GUI controls and/or opcode debugging
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::PathBuf;
