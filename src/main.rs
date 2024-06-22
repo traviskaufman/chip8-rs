@@ -25,6 +25,11 @@ use std::io::stdout;
 struct Cli {
     /// The ROM to load into the emulator
     rom: PathBuf,
+    /// Whether or not to enable the quirk for the 8XY6/8XYE instructions
+    /// where shifting happens directly in the Vx register. Needed for some games.
+    /// See https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#logical-and-arithmetic-instructions
+    #[arg(long, default_value_t = false)]
+    shiftquirk: bool,
 }
 
 /// https://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.2
@@ -348,8 +353,12 @@ fn main() {
                     }
                     // SHR Vx {, Vy} ... todo will maybe have to revisit this
                     0x6 => {
-                        registers.v[0xF] = registers.v[x as usize] & 0x1;
+                        if !cli.shiftquirk {
+                            registers.v[x as usize] = registers.v[y as usize];
+                        }
+                        let flag = registers.v[x as usize] & 0x1;
                         registers.v[x as usize] >>= 1;
+                        registers.v[0xF] = flag;
                     }
                     // SUBN Vx, Vy
                     0x7 => {
@@ -360,8 +369,12 @@ fn main() {
                     }
                     // SHL Vx {, Vy}
                     0xE => {
-                        registers.v[0xF] = (registers.v[x as usize] & 0x80) >> 7;
+                        if !cli.shiftquirk {
+                            registers.v[x as usize] = registers.v[y as usize];
+                        }
+                        let flag = (registers.v[x as usize] & 0x80) >> 7;
                         registers.v[x as usize] <<= 1;
+                        registers.v[0xF] = flag;
                     }
                     _ => panic!("Unknown opcode instruction {:04X}", opcode),
                 }
