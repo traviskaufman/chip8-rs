@@ -88,7 +88,7 @@ fn main() {
     let mut pc: u16 = 0x200;
     let mut sp: u8 = 0;
     // TODO: Make mut and implement stack
-    let stack: [u16; 16] = [0; 16];
+    let mut stack: [u16; 16] = [0; 16];
 
     // Set up timer thread
     let timer_kill_rx = killrx.clone();
@@ -251,6 +251,53 @@ fn main() {
                     *pixel = false;
                 }
             }
+            // Return from subroutine
+            0x00EE => {
+                sp -= 1;
+                pc = stack[sp as usize];
+            }
+            // 0x1NNN - Jump to address NNN
+            0x1000..=0x1FFF => {
+                pc = opcode & 0x0FFF;
+            }
+            // 2nnn - CALL addr
+            // Call subroutine at nnn.
+            // The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.
+            0x2000..=0x2FFF => {
+                stack[sp as usize] = pc;
+                sp += 1;
+                pc = opcode & 0x0FFF;
+            }
+            // 3xkk - SE Vx, byte
+            // Skip next instruction if Vx = kk.
+            // The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
+            0x3000..=0x3FFF => {
+                let x = (opcode & 0x0F00) >> 8;
+                let kk = (opcode & 0x00FF) as u8;
+                if registers.v[x as usize] == kk {
+                    pc += 2;
+                }
+            }
+            //4xkk - SNE Vx, byte
+            // Skip next instruction if Vx != kk.
+            // The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.
+            0x4000..=0x4FFF => {
+                let x = (opcode & 0x0F00) >> 8;
+                let kk = (opcode & 0x00FF) as u8;
+                if registers.v[x as usize] != kk {
+                    pc += 2;
+                }
+            }
+            // 5xy0 - SE Vx, Vy
+            // Skip next instruction if Vx = Vy.
+            // The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.
+            0x5000..=0x5FFF => {
+                let x = (opcode & 0x0F00) >> 8;
+                let y = (opcode & 0x00F0) >> 4;
+                if x == y {
+                    pc += 2;
+                }
+            }
             // Set VX to NN
             0x6000..=0x6FFF => {
                 let x = (opcode & 0x0F00) >> 8;
@@ -261,6 +308,75 @@ fn main() {
                 let x = (opcode & 0x0F00) >> 8;
                 let kk = (opcode & 0x00FF) as u8;
                 registers.v[x as usize] = registers.v[x as usize].wrapping_add(kk);
+            }
+            // 8xy0 - LD Vx, Vy
+            // Set Vx = Vy.
+            // Stores the value of register Vy in register Vx.
+            0x8000..=0x8FFF => {
+                let x = (opcode & 0x0F00) >> 8;
+                let y = (opcode & 0x00F0) >> 4;
+                let op = opcode & 0x000F;
+                match op {
+                    // LD Vx, Vy
+                    0x0 => {
+                        registers.v[x as usize] = registers.v[y as usize];
+                    }
+                    // OR Vx, Vy
+                    0x1 => {
+                        registers.v[x as usize] |= registers.v[y as usize];
+                    }
+                    // AND Vx, Vy
+                    0x2 => {
+                        registers.v[x as usize] &= registers.v[y as usize];
+                    }
+                    // XOR Vx, Vy
+                    0x3 => {
+                        registers.v[x as usize] ^= registers.v[y as usize];
+                    }
+                    // ADD Vx, Vy
+                    0x4 => {
+                        let (res, overflow) =
+                            registers.v[x as usize].overflowing_add(registers.v[y as usize]);
+                        registers.v[x as usize] = res;
+                        registers.v[0xF] = overflow as u8;
+                    }
+                    // SUB Vx, Vy
+                    0x5 => {
+                        let (res, overflow) =
+                            registers.v[x as usize].overflowing_sub(registers.v[y as usize]);
+                        registers.v[x as usize] = res;
+                        // NOT borrow
+                        registers.v[0xF] = !overflow as u8;
+                    }
+                    // SHR Vx {, Vy} ... todo will maybe have to revisit this
+                    0x6 => {
+                        registers.v[0xF] = registers.v[x as usize] & 0x1;
+                        registers.v[x as usize] >>= 1;
+                    }
+                    // SUBN Vx, Vy
+                    0x7 => {
+                        let (res, overflow) =
+                            registers.v[y as usize].overflowing_sub(registers.v[x as usize]);
+                        registers.v[x as usize] = res;
+                        registers.v[0xF] = !overflow as u8;
+                    }
+                    // SHL Vx {, Vy}
+                    0xE => {
+                        registers.v[0xF] = (registers.v[x as usize] & 0x80) >> 7;
+                        registers.v[x as usize] <<= 1;
+                    }
+                    _ => panic!("Unknown opcode instruction {:04X}", opcode),
+                }
+            }
+            // 9xy0 - SNE Vx, Vy
+            // Skip next instruction if Vx != Vy.
+            // The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.
+            0x9000..=0x9FFF => {
+                let x = (opcode & 0x0F00) >> 8;
+                let y = (opcode & 0x00F0) >> 4;
+                if registers.v[x as usize] != registers.v[y as usize] {
+                    pc += 2;
+                }
             }
             // Set I to NNN
             0xA000..=0xAFFF => {
@@ -290,14 +406,79 @@ fn main() {
                 }
                 registers.v[0xF] = collision as u8;
             }
-            // 0x1NNN - Jump to address NNN
-            0x1000..=0x1FFF => {
-                pc = opcode & 0x0FFF;
-            }
-            // Return from subroutine
-            0x00EE => {
-                sp -= 1;
-                pc = stack[sp as usize];
+            0xF000..=0xFFFF => {
+                let x = (opcode & 0x0F00) >> 8;
+                let op = opcode & 0x00FF;
+                match op {
+                    // Fx07 - LD Vx, DT
+                    // Set Vx = delay timer value.
+                    // The value of DT is placed into Vx.
+                    0x07 => {
+                        registers.v[x as usize] = registers.delay.load(Ordering::Acquire);
+                    }
+                    // Fx0A - LD Vx, K
+                    // Wait for a key press, store the value of the key in Vx.
+                    // All execution stops until a key is pressed, then the value of that key is stored in Vx.
+                    0x0A => {
+                        // TODO: Keypress
+                    }
+                    // Fx15 - LD DT, Vx
+                    // Set delay timer = Vx.
+                    // DT is set equal to the value of Vx.
+                    0x15 => {
+                        registers
+                            .delay
+                            .store(registers.v[x as usize], Ordering::Relaxed);
+                    }
+                    // Fx18 - LD ST, Vx
+                    // Set sound timer = Vx.
+                    // ST is set equal to the value of Vx.
+                    0x18 => {
+                        registers
+                            .sound
+                            .store(registers.v[x as usize], Ordering::Relaxed);
+                    }
+                    // Fx1E - ADD I, Vx
+                    // Set I = I + Vx.
+                    // The values of I and Vx are added, and the results are stored in I.
+                    0x1E => {
+                        registers.i += registers.v[x as usize] as u16;
+                    }
+                    // Fx29 - LD F, Vx
+                    // Set I = location of sprite for digit Vx.
+                    // The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx.
+                    0x29 => {
+                        // Sprites are indexed from 0x0000 in memory
+                        registers.i = registers.v[x as usize] as u16 * 5;
+                    }
+                    // Fx33 - LD B, Vx
+                    // Store BCD representation of Vx in memory locations I, I+1, and I+2.
+                    // The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I,
+                    // the tens digit at location I+1, and the ones digit at location I+2.
+                    0x33 => {
+                        let vx = registers.v[x as usize];
+                        memory[registers.i as usize] = vx / 100;
+                        memory[(registers.i + 1) as usize] = (vx / 10) % 10;
+                        memory[(registers.i + 2) as usize] = vx % 10;
+                    }
+                    // Fx55 - LD [I], Vx
+                    // Store registers V0 through Vx in memory starting at location I.
+                    // The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
+                    0x55 => {
+                        for i in 0..=x {
+                            memory[(registers.i + i) as usize] = registers.v[i as usize];
+                        }
+                    }
+                    // Fx65 - LD Vx, [I]
+                    // Read registers V0 through Vx from memory starting at location I.
+                    // The interpreter reads values from memory starting at location I into registers V0 through Vx.
+                    0x65 => {
+                        for i in 0..=x {
+                            registers.v[i as usize] = memory[(registers.i + i) as usize];
+                        }
+                    }
+                    op => panic!("Unknown opcode instruction {:04X}", op),
+                }
             }
             op => panic!("Unknown opcode: {:04X}", op),
         }
