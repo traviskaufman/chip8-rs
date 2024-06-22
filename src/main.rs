@@ -22,8 +22,8 @@ use crossterm::{
     ExecutableCommand,
 };
 use ratatui::{
-    prelude::{CrosstermBackend, Stylize, Terminal},
-    widgets::Paragraph,
+    prelude::*,
+    widgets::{Block, Paragraph},
 };
 use std::io::stdout;
 
@@ -163,6 +163,7 @@ fn main() {
         .unwrap();
 
     // Set up display
+    let rom_title = cli.rom.display().to_string();
     let display = Arc::new(RwLock::new([false; 64 * 32]));
     let displaykillrx = killrx.clone();
     let displaytimerrx = timerrx.clone();
@@ -195,10 +196,36 @@ fn main() {
                 }
                 terminal
                     .draw(|f| {
+                        f.render_widget(Block::new().on_black(), f.size());
+
+                        let layout = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints(vec![
+                                Constraint::Length(3),
+                                Constraint::Length(32),
+                                Constraint::Fill(1),
+                            ])
+                            .split(f.size());
+
+                        let title = layout[0];
                         f.render_widget(
-                            Paragraph::new(display_str).light_blue().on_black(),
-                            f.size(),
+                            Paragraph::new(format!("[Chip8-RS] {}", rom_title))
+                                .white()
+                                .centered()
+                                .block(Block::bordered()),
+                            title,
                         );
+
+                        let emu_layout = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints(vec![
+                                Constraint::Fill(1),
+                                Constraint::Length(64),
+                                Constraint::Fill(1),
+                            ])
+                            .split(layout[1]);
+                        let emu = emu_layout[1];
+                        f.render_widget(Paragraph::new(display_str).light_blue().on_black(), emu);
                     })
                     .unwrap();
             }
