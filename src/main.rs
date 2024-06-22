@@ -186,7 +186,7 @@ fn main() {
                 terminal
                     .draw(|f| {
                         f.render_widget(
-                            Paragraph::new(display_str).green().on_dark_gray(),
+                            Paragraph::new(display_str).light_blue().on_black(),
                             f.size(),
                         );
                     })
@@ -256,6 +256,11 @@ fn main() {
                 let x = (opcode & 0x0F00) >> 8;
                 let nn = (opcode & 0x00FF) as u8;
                 registers.v[x as usize] = nn;
+            }
+            0x7000..=0x7FFF => {
+                let x = (opcode & 0x0F00) >> 8;
+                let kk = (opcode & 0x00FF) as u8;
+                registers.v[x as usize] = registers.v[x as usize].wrapping_add(kk);
             }
             // Set I to NNN
             0xA000..=0xAFFF => {
