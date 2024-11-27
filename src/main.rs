@@ -13,6 +13,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 
 use byteorder::{BigEndian, ReadBytesExt};
+use chip8::GameShell;
 use clap::Parser;
 use crossbeam_channel::unbounded;
 use crossbeam_channel::TryRecvError;
@@ -85,9 +86,8 @@ fn fill_hex_sprites(memory: &mut [u8; 4096]) {
 
 /// Everything is taken from http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.1
 fn main() {
-    // Set up core shell
     let cli = Cli::parse();
-    let (killtx, killrx) = unbounded::<()>();
+    let gameshell = Arc::new(GameShell::new(cli.rom, cli.shiftquirk));
 
     // Set up memory
     let mut memory: [u8; 4096] = [0; 4096];
@@ -101,7 +101,7 @@ fn main() {
     let mut stack: [u16; 16] = [0; 16];
 
     // Set up timer thread
-    let timer_kill_rx = killrx.clone();
+    let timer_kill_rx = gameshell.killrx();
     let (timertx, timerrx) = unbounded();
     let timer_thread = thread::Builder::new()
         .name("timer".to_string())
@@ -120,7 +120,7 @@ fn main() {
 
     // Set up delay+sound threads
     let delay = registers.delay.clone();
-    let delaykillrx = killrx.clone();
+    let delaykillrx = gameshell.killrx();
     let delaytimerrx = timerrx.clone();
     let delay_thread = thread::Builder::new()
         .name("timer".to_string())
@@ -141,7 +141,7 @@ fn main() {
         .unwrap();
 
     let sound = registers.sound.clone();
-    let soundkillrx = killrx.clone();
+    let soundkillrx = gameshell.killrx();
     let soundtimerrx = timerrx.clone();
     let sound_thread = thread::Builder::new()
         .name("sound".to_string())
@@ -163,9 +163,9 @@ fn main() {
         .unwrap();
 
     // Set up display
-    let rom_title = cli.rom.display().to_string();
+    let rom_title = gameshell.rom_title();
     let display = Arc::new(RwLock::new([false; 64 * 32]));
-    let displaykillrx = killrx.clone();
+    let displaykillrx = gameshell.killrx();
     let displaytimerrx = timerrx.clone();
     let render_display = display.clone();
     stdout().execute(EnterAlternateScreen).unwrap();
@@ -233,8 +233,8 @@ fn main() {
         .unwrap();
 
     // Set up keyboard
-    let sigkilltx = killtx.clone();
-    let keyboardkillrx = killrx.clone();
+    let keyboard_gameshell = gameshell.clone();
+    let keyboardkillrx = gameshell.killrx();
     let keyboard_thread = thread::Builder::new()
         .name("keyboard".to_string())
         .spawn(move || loop {
@@ -250,7 +250,7 @@ fn main() {
                         modifiers: event::KeyModifiers::CONTROL,
                         ..
                     }) => {
-                        sigkilltx.send(()).unwrap();
+                        keyboard_gameshell.kill();
                         break;
                     }
                     // TODO: Get other keyboard inputs working
@@ -262,14 +262,13 @@ fn main() {
 
     // Load ROM
     // TODO: Logging
-    // let rom_name = cli.rom.display().to_string();
-    let mut rom = File::open(cli.rom).unwrap();
+    let mut rom = File::open(gameshell.rom_path()).unwrap();
     rom.read(&mut memory[0x200..]).unwrap();
     // println!("Load: {} ({} bytes)", rom_name, nb);
 
     // Main program loop / CPU
     loop {
-        match killrx.try_recv() {
+        match gameshell.killrx().try_recv() {
             Err(TryRecvError::Empty) => {}
             _ => break,
         }
@@ -532,7 +531,7 @@ fn main() {
     // End Program
     stdout().execute(LeaveAlternateScreen).unwrap();
     disable_raw_mode().unwrap();
-    killtx.send(()).unwrap();
+    gameshell.kill();
     timer_thread.join().unwrap();
     delay_thread.join().unwrap();
     sound_thread.join().unwrap();
