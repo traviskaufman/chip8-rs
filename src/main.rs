@@ -16,7 +16,6 @@ use byteorder::{BigEndian, ReadBytesExt};
 use chip8::GameShell;
 use clap::Parser;
 use crossbeam_channel::unbounded;
-use crossbeam_channel::TryRecvError;
 use crossterm::event;
 use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -87,7 +86,7 @@ fn fill_hex_sprites(memory: &mut [u8; 4096]) {
 /// Everything is taken from http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.1
 fn main() {
     let cli = Cli::parse();
-    let gameshell = Arc::new(GameShell::new(cli.rom, cli.shiftquirk));
+    let gameshell = GameShell::new(cli.rom, cli.shiftquirk);
 
     // Set up memory
     let mut memory: [u8; 4096] = [0; 4096];
@@ -101,15 +100,14 @@ fn main() {
     let mut stack: [u16; 16] = [0; 16];
 
     // Set up timer thread
-    let timer_kill_rx = gameshell.killrx();
+    let timerkill = gameshell.clone_killsignal();
     let (timertx, timerrx) = unbounded();
     let timer_thread = thread::Builder::new()
         .name("timer".to_string())
         .spawn(move || {
             loop {
-                match timer_kill_rx.try_recv() {
-                    Err(TryRecvError::Empty) => {}
-                    _ => break,
+                if timerkill.received() {
+                    break;
                 }
                 // 60Hz
                 std::thread::sleep(std::time::Duration::from_millis(16));
@@ -120,14 +118,13 @@ fn main() {
 
     // Set up delay+sound threads
     let delay = registers.delay.clone();
-    let delaykillrx = gameshell.killrx();
+    let delaykill = gameshell.clone_killsignal();
     let delaytimerrx = timerrx.clone();
     let delay_thread = thread::Builder::new()
         .name("timer".to_string())
         .spawn(move || loop {
-            match delaykillrx.try_recv() {
-                Err(TryRecvError::Empty) => {}
-                _ => break,
+            if delaykill.received() {
+                break;
             }
             if let Err(_) = delaytimerrx.recv() {
                 break;
@@ -141,14 +138,13 @@ fn main() {
         .unwrap();
 
     let sound = registers.sound.clone();
-    let soundkillrx = gameshell.killrx();
+    let soundkill = gameshell.clone_killsignal();
     let soundtimerrx = timerrx.clone();
     let sound_thread = thread::Builder::new()
         .name("sound".to_string())
         .spawn(move || loop {
-            match soundkillrx.try_recv() {
-                Err(TryRecvError::Empty) => {}
-                _ => break,
+            if soundkill.received() {
+                break;
             }
             if let Err(_) = soundtimerrx.recv() {
                 break;
@@ -163,9 +159,9 @@ fn main() {
         .unwrap();
 
     // Set up display
-    let rom_title = gameshell.rom_title();
+    let rom_title = gameshell.print_rom_title();
     let display = Arc::new(RwLock::new([false; 64 * 32]));
-    let displaykillrx = gameshell.killrx();
+    let displaykill = gameshell.clone_killsignal();
     let displaytimerrx = timerrx.clone();
     let render_display = display.clone();
     stdout().execute(EnterAlternateScreen).unwrap();
@@ -178,9 +174,8 @@ fn main() {
             terminal.clear().unwrap();
 
             loop {
-                match displaykillrx.try_recv() {
-                    Err(TryRecvError::Empty) => {}
-                    _ => break,
+                if displaykill.received() {
+                    break;
                 }
                 if let Err(_) = displaytimerrx.recv() {
                     break;
@@ -233,14 +228,12 @@ fn main() {
         .unwrap();
 
     // Set up keyboard
-    let keyboard_gameshell = gameshell.clone();
-    let keyboardkillrx = gameshell.killrx();
+    let keyboardkill = gameshell.clone_killsignal();
     let keyboard_thread = thread::Builder::new()
         .name("keyboard".to_string())
         .spawn(move || loop {
-            match keyboardkillrx.try_recv() {
-                Err(TryRecvError::Empty) => {}
-                _ => break,
+            if keyboardkill.received() {
+                break;
             }
             // If read ctrl+c from crossterm, send kill signal
             if let Ok(evt) = event::read() {
@@ -250,7 +243,7 @@ fn main() {
                         modifiers: event::KeyModifiers::CONTROL,
                         ..
                     }) => {
-                        keyboard_gameshell.kill();
+                        keyboardkill.send();
                         break;
                     }
                     // TODO: Get other keyboard inputs working
@@ -267,10 +260,10 @@ fn main() {
     // println!("Load: {} ({} bytes)", rom_name, nb);
 
     // Main program loop / CPU
+    let mainkill = gameshell.clone_killsignal();
     loop {
-        match gameshell.killrx().try_recv() {
-            Err(TryRecvError::Empty) => {}
-            _ => break,
+        if mainkill.received() {
+            break;
         }
 
         let opcode = Cursor::new(&memory[pc as usize..])
@@ -531,7 +524,7 @@ fn main() {
     // End Program
     stdout().execute(LeaveAlternateScreen).unwrap();
     disable_raw_mode().unwrap();
-    gameshell.kill();
+    mainkill.send();
     timer_thread.join().unwrap();
     delay_thread.join().unwrap();
     sound_thread.join().unwrap();
