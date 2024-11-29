@@ -117,26 +117,7 @@ fn main() {
         })
         .unwrap();
 
-    // Set up delay+sound threads
-    let delay = registers.delay.clone();
-    let delaykill = gameshell.clone_killsignal();
-    let delaytimerrx = timerrx.clone();
-    let delay_thread = thread::Builder::new()
-        .name("timer".to_string())
-        .spawn(move || loop {
-            if delaykill.received() {
-                break;
-            }
-            if let Err(_) = delaytimerrx.recv() {
-                break;
-            }
-
-            let vdelay = delay.load(Ordering::Acquire);
-            if vdelay > 0 {
-                delay.store(vdelay - 1, Ordering::Release);
-            }
-        })
-        .unwrap();
+    // Set up sound thread
 
     let sound = registers.sound.clone();
     let soundkill = gameshell.clone_killsignal();
@@ -292,7 +273,6 @@ fn main() {
     disable_raw_mode().unwrap();
     mainkill.send();
     timer_thread.join().unwrap();
-    delay_thread.join().unwrap();
     sound_thread.join().unwrap();
     display_thread.join().unwrap();
     println!();
@@ -307,12 +287,19 @@ fn update(
     registers: &mut Registers,
     shiftquirk: bool,
 ) {
+    // NOTE: I think this should happen *before* an opcode update, as if the opcode sets the delay to
+    // 8, we do not want to then decrement it immediately to 7, and instead wait until the next loop...
+    // but have to check.
+    let vdelay = registers.delay.load(Ordering::Acquire);
+    if vdelay > 0 {
+        registers.delay.store(vdelay - 1, Ordering::Release);
+    }
+
     let opcode = Cursor::new(&memory[*pc as usize..])
         .read_u16::<BigEndian>()
         .unwrap();
     // println!("{:04x}: {:04x}", pc, opcode);
     *pc += 2;
-
     match opcode {
         // clear the screen
         0x00e0 => {
