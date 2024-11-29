@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
+use std::time::Duration;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use chip8::GameShell;
@@ -227,32 +228,6 @@ fn main() {
         })
         .unwrap();
 
-    // Set up keyboard
-    let keyboardkill = gameshell.clone_killsignal();
-    let keyboard_thread = thread::Builder::new()
-        .name("keyboard".to_string())
-        .spawn(move || loop {
-            if keyboardkill.received() {
-                break;
-            }
-            // If read ctrl+c from crossterm, send kill signal
-            if let Ok(evt) = event::read() {
-                match evt {
-                    event::Event::Key(event::KeyEvent {
-                        code: event::KeyCode::Char('c'),
-                        modifiers: event::KeyModifiers::CONTROL,
-                        ..
-                    }) => {
-                        keyboardkill.send();
-                        break;
-                    }
-                    // TODO: Get other keyboard inputs working
-                    _ => {}
-                }
-            }
-        })
-        .unwrap();
-
     // Load ROM
     // TODO: Logging
     let mut rom = File::open(gameshell.rom_path()).unwrap();
@@ -261,21 +236,55 @@ fn main() {
 
     // Main program loop / CPU
     let mainkill = gameshell.clone_killsignal();
+    let mut previous = std::time::Instant::now();
+    let mut lag = std::time::Duration::from_millis(0);
+    /// 60Hz
+    const FRAMERATE: Duration = std::time::Duration::from_millis(16);
     loop {
+        let current = std::time::Instant::now();
+        let elapsed = current - previous;
+        previous = current;
+        lag += elapsed;
+
         if mainkill.received() {
             break;
         }
 
-        // TODO: Input
-        update(
-            &mut memory,
-            &mut pc,
-            &display,
-            &mut sp,
-            &mut stack,
-            &mut registers,
-            cli.shiftquirk,
-        );
+        // If read ctrl+c from crossterm, send kill signal
+        match event::poll(std::time::Duration::from_millis(0)) {
+            Ok(true) => {
+                if let Ok(evt) = event::read() {
+                    match evt {
+                        event::Event::Key(event::KeyEvent {
+                            code: event::KeyCode::Char('c'),
+                            modifiers: event::KeyModifiers::CONTROL,
+                            ..
+                        }) => {
+                            break;
+                        }
+                        // TODO: Get other keyboard inputs working
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        while lag >= FRAMERATE {
+            update(
+                &mut memory,
+                &mut pc,
+                &display,
+                &mut sp,
+                &mut stack,
+                &mut registers,
+                cli.shiftquirk,
+            );
+            lag -= FRAMERATE
+        }
+
+        // 60Hz
+        std::thread::sleep(FRAMERATE - lag);
     }
 
     // end program
@@ -286,7 +295,6 @@ fn main() {
     delay_thread.join().unwrap();
     sound_thread.join().unwrap();
     display_thread.join().unwrap();
-    keyboard_thread.join().unwrap();
     println!();
 }
 
