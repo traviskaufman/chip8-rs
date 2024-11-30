@@ -5,21 +5,21 @@
 /// - Run an actual game
 /// - Maybe implement super-chip or xo-chip
 /// - Maybe implement better GUI controls and/or opcode debugging
-use std::fs::File;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use byteorder::{BigEndian, ReadBytesExt};
-use chip8::{GameShell, Memory};
+use chip8::{logger, GameShell, Memory};
 use clap::Parser;
 use crossterm::event;
 use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
+use log::info;
 use ratatui::{
     prelude::*,
     widgets::{Block, Paragraph},
@@ -59,6 +59,8 @@ impl Registers {
 
 /// Everything is taken from http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.1
 fn main() {
+    logger::init("chip8.log").unwrap();
+
     let cli = Cli::parse();
     let gameshell = GameShell::new(cli.rom, cli.shiftquirk);
 
@@ -76,11 +78,7 @@ fn main() {
     let rom_title = gameshell.print_rom_title();
     let display = Arc::new(RwLock::new([false; 64 * 32]));
 
-    // Load ROM
-    // TODO: Logging
-    let mut rom = File::open(gameshell.rom_path()).unwrap();
-    rom.read(&mut memory[0x200..]).unwrap();
-    // println!("Load: {} ({} bytes)", rom_name, nb);
+    memory.load_rom(gameshell.rom_path()).unwrap();
 
     // Main program loop / CPU
     let mainkill = gameshell.clone_killsignal();
@@ -218,7 +216,7 @@ fn update(
     let opcode = Cursor::new(&memory[*pc as usize..])
         .read_u16::<BigEndian>()
         .unwrap();
-    // println!("{:04x}: {:04x}", pc, opcode);
+    info!("{:04x}: {:04x}", pc, opcode);
     *pc += 2;
     match opcode {
         // clear the screen

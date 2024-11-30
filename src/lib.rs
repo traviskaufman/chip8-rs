@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
 mod cpu;
+pub mod logger;
 mod memory;
 pub use cpu::CPU;
 pub use memory::Memory;

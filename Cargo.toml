@@ -9,3 +9,6 @@ clap = { version = "4.5.7", features = ["derive"] }
 crossbeam-channel = "0.5.13"
 crossterm = "0.27.0"
 ratatui = "0.26.3"
+simple-logging = "2.0.2"
+log = "0.4.22"
+anyhow = "1.0.93"

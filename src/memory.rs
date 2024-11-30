@@ -1,4 +1,11 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fs::File,
+    io::{self, Read},
+    ops::{Deref, DerefMut},
+    path::Path,
+};
+
+use log::info;
 
 /// Stores the RAM memory, can be used as proxy access to the underlying buffer.
 pub struct Memory {
@@ -10,6 +17,18 @@ impl Memory {
         let mut buf = [0; 4096];
         Self::fill_hex_sprites(&mut buf);
         Self { buf }
+    }
+
+    pub fn load_rom<P: AsRef<Path>>(&mut self, rom_path: P) -> io::Result<()> {
+        let rom_path = rom_path.as_ref();
+        let rom_name = rom_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("(Unknown)");
+        let mut rom = File::open(rom_path)?;
+        let nb = rom.read(&mut self.buf[0x200..])?;
+        info!("Load ROM: {} ({} bytes)", rom_name, nb);
+        Ok(())
     }
 
     fn fill_hex_sprites(memory: &mut [u8; 4096]) {
