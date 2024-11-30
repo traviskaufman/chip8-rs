@@ -2,6 +2,11 @@ use std::path::PathBuf;
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
+mod cpu;
+mod memory;
+pub use cpu::CPU;
+pub use memory::Memory;
+
 #[derive(Clone)]
 pub struct KillSignal {
     tx: Sender<()>,

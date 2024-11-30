@@ -13,7 +13,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use byteorder::{BigEndian, ReadBytesExt};
-use chip8::GameShell;
+use chip8::{GameShell, Memory};
 use clap::Parser;
 use crossterm::event;
 use crossterm::{
@@ -57,39 +57,13 @@ impl Registers {
     }
 }
 
-fn fill_hex_sprites(memory: &mut [u8; 4096]) {
-    const HEX_SPRITES: [u8; 80] = [
-        0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-        0x20, 0x60, 0x20, 0x20, 0x70, // 1
-        0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-        0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-        0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-        0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-        0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-        0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-        0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-        0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-        0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-        0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-        0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-        0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-        0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-        0xF0, 0x80, 0xF0, 0x80, 0x80, // F
-    ];
-
-    for (i, &byte) in HEX_SPRITES.iter().enumerate() {
-        memory[i] = byte;
-    }
-}
-
 /// Everything is taken from http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.1
 fn main() {
     let cli = Cli::parse();
     let gameshell = GameShell::new(cli.rom, cli.shiftquirk);
 
     // Set up memory
-    let mut memory: [u8; 4096] = [0; 4096];
-    fill_hex_sprites(&mut memory);
+    let mut memory = Memory::new();
 
     // Set up registers
     let mut registers = Registers::new();
@@ -219,7 +193,7 @@ fn main() {
 }
 
 fn update(
-    memory: &mut [u8; 4096],
+    memory: &mut Memory,
     pc: &mut u16,
     display: &Arc<RwLock<[bool; 64 * 32]>>,
     sp: &mut u8,
