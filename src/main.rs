@@ -1,4 +1,5 @@
 /// TODO:
+/// - Get rid of outdated multithreading logic
 /// - Keypad test
 /// - Quirks test
 /// - Beep test
