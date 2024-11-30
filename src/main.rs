@@ -1,4 +1,6 @@
 /// TODO:
+/// - Refactor display
+/// - Refactor CPU
 /// - Get rid of outdated multithreading logic
 /// - Keypad test
 /// - Quirks test
