@@ -10,13 +10,11 @@ use std::io::{Cursor, Read};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
-use std::thread;
 use std::time::Duration;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use chip8::GameShell;
 use clap::Parser;
-use crossbeam_channel::unbounded;
 use crossterm::event;
 use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -100,114 +98,9 @@ fn main() {
     // TODO: Make mut and implement stack
     let mut stack: [u16; 16] = [0; 16];
 
-    // Set up timer thread
-    let timerkill = gameshell.clone_killsignal();
-    let (timertx, timerrx) = unbounded();
-    let timer_thread = thread::Builder::new()
-        .name("timer".to_string())
-        .spawn(move || {
-            loop {
-                if timerkill.received() {
-                    break;
-                }
-                // 60Hz
-                std::thread::sleep(std::time::Duration::from_millis(16));
-                timertx.send(std::time::Instant::now()).unwrap();
-            }
-        })
-        .unwrap();
-
-    // Set up sound thread
-
-    let sound = registers.sound.clone();
-    let soundkill = gameshell.clone_killsignal();
-    let soundtimerrx = timerrx.clone();
-    let sound_thread = thread::Builder::new()
-        .name("sound".to_string())
-        .spawn(move || loop {
-            if soundkill.received() {
-                break;
-            }
-            if let Err(_) = soundtimerrx.recv() {
-                break;
-            }
-
-            let vsound = sound.load(Ordering::Acquire);
-            if vsound > 0 {
-                // TODO: Make actual sound
-                sound.store(vsound - 1, Ordering::Release);
-            }
-        })
-        .unwrap();
-
     // Set up display
     let rom_title = gameshell.print_rom_title();
     let display = Arc::new(RwLock::new([false; 64 * 32]));
-    let displaykill = gameshell.clone_killsignal();
-    let displaytimerrx = timerrx.clone();
-    let render_display = display.clone();
-    stdout().execute(EnterAlternateScreen).unwrap();
-    enable_raw_mode().unwrap();
-    let display_thread = thread::Builder::new()
-        .name("display".to_string())
-        .spawn(move || {
-            let backend = CrosstermBackend::new(stdout());
-            let mut terminal = Terminal::new(backend).unwrap();
-            terminal.clear().unwrap();
-
-            loop {
-                if displaykill.received() {
-                    break;
-                }
-                if let Err(_) = displaytimerrx.recv() {
-                    break;
-                }
-
-                let mut display_str = String::new();
-                let display = render_display.read().unwrap();
-                for (i, &pixel) in display.iter().enumerate() {
-                    display_str.push(if pixel { '█' } else { ' ' });
-                    if i % 64 == 63 {
-                        display_str.push('\n');
-                    }
-                }
-                terminal
-                    .draw(|f| {
-                        f.render_widget(Block::new().on_black(), f.size());
-
-                        let layout = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints(vec![
-                                Constraint::Length(3),
-                                Constraint::Length(32),
-                                Constraint::Fill(1),
-                            ])
-                            .split(f.size());
-
-                        let title = layout[0];
-                        f.render_widget(
-                            Paragraph::new(format!("[Chip8-RS] {}", rom_title))
-                                .white()
-                                .centered()
-                                .block(Block::bordered()),
-                            title,
-                        );
-
-                        let emu_layout = Layout::default()
-                            .direction(Direction::Horizontal)
-                            .constraints(vec![
-                                Constraint::Fill(1),
-                                Constraint::Length(64),
-                                Constraint::Fill(1),
-                            ])
-                            .split(layout[1]);
-                        let emu = emu_layout[1];
-                        f.render_widget(Paragraph::new(display_str).light_blue().on_black(), emu);
-                    })
-                    .unwrap();
-            }
-        })
-        .unwrap();
 
     // Load ROM
     // TODO: Logging
@@ -221,6 +114,14 @@ fn main() {
     let mut lag = std::time::Duration::from_millis(0);
     /// 60Hz
     const FRAMERATE: Duration = std::time::Duration::from_millis(16);
+
+    stdout().execute(EnterAlternateScreen).unwrap();
+    enable_raw_mode().unwrap();
+
+    let backend = CrosstermBackend::new(stdout());
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.clear().unwrap();
+
     loop {
         let current = std::time::Instant::now();
         let elapsed = current - previous;
@@ -264,7 +165,49 @@ fn main() {
             lag -= FRAMERATE
         }
 
-        // 60Hz
+        let mut display_str = String::new();
+        let display = display.read().unwrap();
+        for (i, &pixel) in display.iter().enumerate() {
+            display_str.push(if pixel { '█' } else { ' ' });
+            if i % 64 == 63 {
+                display_str.push('\n');
+            }
+        }
+        terminal
+            .draw(|f| {
+                f.render_widget(Block::new().on_black(), f.size());
+
+                let layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![
+                        Constraint::Length(3),
+                        Constraint::Length(32),
+                        Constraint::Fill(1),
+                    ])
+                    .split(f.size());
+
+                let title = layout[0];
+                f.render_widget(
+                    Paragraph::new(format!("[Chip8-RS] {}", rom_title))
+                        .white()
+                        .centered()
+                        .block(Block::bordered()),
+                    title,
+                );
+
+                let emu_layout = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints(vec![
+                        Constraint::Fill(1),
+                        Constraint::Length(64),
+                        Constraint::Fill(1),
+                    ])
+                    .split(layout[1]);
+                let emu = emu_layout[1];
+                f.render_widget(Paragraph::new(display_str).light_blue().on_black(), emu);
+            })
+            .unwrap();
+
         std::thread::sleep(FRAMERATE - lag);
     }
 
@@ -272,9 +215,6 @@ fn main() {
     stdout().execute(LeaveAlternateScreen).unwrap();
     disable_raw_mode().unwrap();
     mainkill.send();
-    timer_thread.join().unwrap();
-    sound_thread.join().unwrap();
-    display_thread.join().unwrap();
     println!();
 }
 
@@ -293,6 +233,12 @@ fn update(
     let vdelay = registers.delay.load(Ordering::Acquire);
     if vdelay > 0 {
         registers.delay.store(vdelay - 1, Ordering::Release);
+    }
+
+    let vsound = registers.sound.load(Ordering::Acquire);
+    if vsound > 0 {
+        // TODO: Make actual sound
+        registers.sound.store(vsound - 1, Ordering::Release);
     }
 
     let opcode = Cursor::new(&memory[*pc as usize..])
